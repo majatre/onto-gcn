@@ -1,10 +1,10 @@
 # Using ontology embeddings for structural inductive bias in gene expression data analysis
 
-Stratifying cancer patients based on their gene expression levels allows improving diagnosis, survival analysis and treatment planning. However, such data isextremely highly dimensional as it contains expression values for over 20000 genesper patient, and the number of samples in the datasets is low. To deal with such settings, we propose to incorporate prior biological knowledge about genes from ontologies into the machine learning system for the task of patient classiﬁcation given their gene expression data. We use ontology embeddings that capture the semantic similarities between the genes to direct a Graph Convolutional Network, and therefore sparsify the network connections. We show this approach provides anadvantage for predicting clinical targets from high-dimensional low-sample data.
+Stratifying cancer patients based on their gene expression levels allows improving diagnosis, survival analysis and treatment planning. However, such data is extremely highly dimensional as it contains expression values for over 20000 genes per patient, and the number of samples in the datasets is low. To deal with such settings, we propose to incorporate prior biological knowledge about genes from ontologies into the machine learning system for the task of patient classiﬁcation given their gene expression data. We use ontology embeddings that capture the semantic similarities between the genes to direct a Graph Convolutional Network, and therefore sparsify the network connections. We show this approach provides anadvantage for predicting clinical targets from high-dimensional low-sample data.
 
 
 ## The main pipeline
-<img src="./data/img/pipeline.png" alt="onto-gcn-pipeline">
+<img src="./data/img/onto-gcn-pipeline.png" alt="onto-gcn-pipeline">
 
 
 ## Code overview
