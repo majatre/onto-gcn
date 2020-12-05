@@ -27,12 +27,15 @@ class GCNLayer(nn.Module):
         self.id_layer = id_layer
         self.adj = adj
         self.centroids = centroids
+
         edges = torch.LongTensor(np.array(self.adj.nonzero()))
         sparse_adj = torch.sparse.FloatTensor(edges, torch.FloatTensor(self.adj.data), torch.Size([self.nb_nodes, self.nb_nodes]))
         self.register_buffer('sparse_adj', sparse_adj)
 
         self.linear = nn.Conv1d(in_channels=self.in_dim, out_channels=int(self.channels/2), kernel_size=1, bias=True)
         self.eye_linear = nn.Conv1d(in_channels=self.in_dim, out_channels=int(self.channels/2), kernel_size=1, bias=True)
+        
+        self.sparse_mm = SparseMM.apply
 
         self.sparse_adj = self.sparse_adj.cuda() if self.cuda else self.sparse_adj
         self.centroids = self.centroids.cuda() if self.cuda else self.centroids
@@ -44,8 +47,10 @@ class GCNLayer(nn.Module):
         x = x.view(-1, nb_nodes)
 
         # Needs this hack to work: https://discuss.pytorch.org/t/does-pytorch-support-autograd-on-sparse-matrix/6156/7
-        #x = D.mm(x.t()).t()
-        x = SparseMM(D)(x.t()).t()
+        # x = D.mm(x.t()).t()
+        # x = SparseMM(D)(x.t()).t()
+        x = self.sparse_mm(D, x.t()).t()
+
 
         x = x.contiguous().view(nb_examples, nb_channels, nb_nodes)
         return x
@@ -66,27 +71,54 @@ class GCNLayer(nn.Module):
         return x
 
 
+# class SparseMM(torch.autograd.Function):
+#     """
+#     Sparse x dense matrix multiplication with autograd support.
+#     Implementation by Soumith Chintala:
+#     https://discuss.pytorch.org/t/
+#     does-pytorch-support-autograd-on-sparse-matrix/6156/7
+#     From: https://github.com/tkipf/pygcn/blob/master/pygcn/layers.py
+#     """
+
+#     def __init__(self, sparse):
+#         super(SparseMM, self).__init__()
+#         self.sparse = sparse
+
+#     @staticmethod
+#     def forward(self, dense):
+#         return torch.matmul(self.sparse, dense)
+
+#     @staticmethod
+#     def backward(self, grad_output):
+#         grad_input = None
+#         if self.needs_input_grad[0]:
+#             grad_input = torch.matmul(self.sparse.t(), grad_output)
+#         return grad_input
+
 class SparseMM(torch.autograd.Function):
     """
     Sparse x dense matrix multiplication with autograd support.
     Implementation by Soumith Chintala:
-    https://discuss.pytorch.org/t/
-    does-pytorch-support-autograd-on-sparse-matrix/6156/7
-    From: https://github.com/tkipf/pygcn/blob/master/pygcn/layers.py
+    https://discuss.pytorch.org/t/does-pytorch-support-autograd-on-sparse-matrix/6156/7
     """
 
-    def __init__(self, sparse):
-        super(SparseMM, self).__init__()
-        self.sparse = sparse
+    @staticmethod
+    def forward(ctx, matrix1, matrix2):
+        ctx.save_for_backward(matrix1, matrix2)
+        return torch.mm(matrix1, matrix2)
 
-    def forward(self, dense):
-        return torch.mm(self.sparse, dense)
+    @staticmethod
+    def backward(ctx, grad_output):
+        matrix1, matrix2 = ctx.saved_tensors
+        grad_matrix1 = grad_matrix2 = None
 
-    def backward(self, grad_output):
-        grad_input = None
-        if self.needs_input_grad[0]:
-            grad_input = torch.mm(self.sparse.t(), grad_output)
-        return grad_input
+        if ctx.needs_input_grad[0]:
+            grad_matrix1 = torch.mm(grad_output, matrix2.t())
+
+        if ctx.needs_input_grad[1]:
+            grad_matrix2 = torch.mm(matrix1.t(), grad_output)
+
+        return grad_matrix1, grad_matrix2
 
 
 class EmbeddingLayer(nn.Module):
@@ -94,11 +126,67 @@ class EmbeddingLayer(nn.Module):
         self.emb_size = emb_size
         super(EmbeddingLayer, self).__init__()
         self.emb_size = emb_size
-        self.emb = nn.Parameter(torch.rand(nb_emb, emb_size))
-        self.reset_parameters()
+        # self.emb = nn.Parameter(torch.ones(nb_emb, emb_size))
+        self.emb = torch.ones(nb_emb, emb_size).cuda()
+        # self.reset_parameters()
 
     def forward(self, x):
         emb = x * self.emb
+        return emb
+
+    def reset_parameters(self):
+        stdv = 1. / np.sqrt(self.emb.size(1))
+        self.emb.data.uniform_(-stdv, stdv)
+
+
+# class EmbeddingLayer(nn.Module):
+#     def __init__(self, nb_emb, emb_size=32):
+#         self.emb_size = emb_size
+#         super(EmbeddingLayer, self).__init__()
+#         self.emb_size = emb_size
+#         self.emb = nn.Parameter(torch.rand(nb_emb, emb_size))
+#         self.reset_parameters()
+
+#     def forward(self, x):
+#         emb = x * self.emb
+#         return emb
+
+#     def reset_parameters(self):
+#         stdv = 1. / np.sqrt(self.emb.size(1))
+#         self.emb.data.uniform_(-stdv, stdv)
+
+
+class EmbeddingLayerFromOntologyScaling(nn.Module):
+    def __init__(self, nb_emb, ontology_vectors, vectors_size=51, emb_size=32):
+        self.emb_size = emb_size
+        self.vectors_size = vectors_size
+        self.ontology_vectors = ontology_vectors
+        super(EmbeddingLayerScaling, self).__init__()
+
+    def forward(self, x):
+        emb = x *  self.ontology_vectors
+        return emb
+
+
+class EmbeddingLayerFromOntology(nn.Module):
+    def __init__(self, nb_emb, ontology_vectors, vectors_size=51, emb_size=32):
+        self.emb_size = emb_size
+        self.vectors_size = vectors_size
+        self.ontology_vectors = ontology_vectors
+        super(EmbeddingLayerFromOntology, self).__init__()
+        expression_size = 1
+        # self.emb = nn.Parameter(torch.ones(nb_emb, emb_size))
+        self.ones = torch.ones(nb_emb, expression_size).cuda()
+        # self.reset_parameters()
+        self.linear = nn.Linear(vectors_size+expression_size, emb_size-expression_size, bias=False)
+
+    def forward(self, x):
+        # torch.cat((embeddings))
+        # print((x *  self.ontology_vectors).shape)
+        emb =  torch.cat((x * self.ones, self.ontology_vectors.repeat(x.shape[0],1,1)), 2)
+        # print(emb.shape)
+        # emb = x *  self.ontology_vectors
+        emb = torch.cat((x * self.ones, self.linear(emb)), 2)
         return emb
 
     def reset_parameters(self):

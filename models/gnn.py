@@ -1,4 +1,4 @@
-"""A SKLearn-style wrapper around our PyTorch models (like Graph Convolutional Network and SparseLogisticRegression) implemented in models.py"""
+"""A GCN.py class extended to support also the GAT message passing."""
 
 import logging
 import time
@@ -19,6 +19,10 @@ from models.utils import *
 from models.models import Model
 from models.gcn_layers import *
 import scipy.sparse
+from torch_geometric.utils.convert import from_scipy_sparse_matrix
+from torch_geometric.nn.conv.gat_conv import GATConv
+from torch_geometric.nn import TopKPooling
+from torch_geometric.data import *
 
 class GCN(Model):
     def __init__(self, **kwargs):
@@ -33,6 +37,8 @@ class GCN(Model):
             raise Exception("adj must be specified for GCN")
         self.adj = scipy.sparse.csr_matrix(self.adj)
         self.adjs, self.centroids = setup_aggregates(self.adj, self.num_layer, self.X, aggregation=self.aggregation, agg_reduce=self.agg_reduce, verbose=self.verbose)
+        if len(self.adjs)==0:
+            self.adjs = [self.adj]
         self.nb_nodes = self.X.shape[1]
 
         if (self.ontology_vectors is not None):
@@ -60,19 +66,32 @@ class GCN(Model):
     def forward(self, x):
         nb_examples, nb_nodes, nb_channels = x.size()
 
+
         if self.embedding:
             x = self.emb(x)
 
-        for i, [conv, gate, dropout] in enumerate(zip(self.conv_layers, self.gating_layers, self.dropout_layers)):
-            for prepool_conv in self.prepool_conv_layers[i]:
-                x = prepool_conv(x)
+            
+        if self.gnn == "GAT":
+            device = torch.device('cuda')
+            edge_index, edge_weight = from_scipy_sparse_matrix(self.adjs[0])
+            data = Batch.from_data_list([Data(x=g, edge_index=edge_index).to(device) for g in x]).to(device)
+            x, edge_index, batch = data.x, data.edge_index, data.batch
 
-            if self.gating > 0.:
+        for i, [conv, gate, dropout] in enumerate(zip(self.conv_layers, self.gating_layers, self.dropout_layers)):
+
+            for prepool_conv in self.prepool_conv_layers[i]:
+                if self.gnn == "GCN":
+                    x = prepool_conv(x)
+                elif self.gnn == "GAT":
+                    x = prepool_conv(x, edge_index)
+
+            if self.gnn == "GCN":
                 x = conv(x)
-                g = gate(x)
-                x = g * x
-            else:
-                x = conv(x)
+            elif self.gnn == "GAT":
+                x = conv(x, edge_index)
+                # print(x.shape)
+                # x, edge_index, _, batch, _, _ = pool(x, edge_index, None, batch).to(device)F.relu()
+
 
             if dropout is not None:
                 id_to_keep = dropout(torch.FloatTensor(np.ones((x.size(0), x.size(1))))).unsqueeze(2)
@@ -93,7 +112,7 @@ class GCN(Model):
 
     def add_onto_embedding_layer(self):
         if self.expression_scaling:
-            self.emb = EmbeddingLayerFromOntologyScaling(self.nb_nodes, self.ontology_vectors, self.ontology_vectors.shape[1], self.embedding)
+            self.emb = EmbeddingLayerScaling(self.nb_nodes, self.ontology_vectors, self.ontology_vectors.shape[1], self.embedding)
         else:
             self.emb = EmbeddingLayerFromOntology(self.nb_nodes, self.ontology_vectors, self.ontology_vectors.shape[1], self.embedding)
 
@@ -105,21 +124,31 @@ class GCN(Model):
     def add_graph_convolutional_layers(self):
         convs = []
         prepool_convs = nn.ModuleList([])
+        # top_k_pooling = nn.ModuleList([])
+        # if len(self.dims) == 1:
+        #     self.dims = self.dims + self.dims
         for i, [c_in, c_out] in enumerate(zip(self.dims[:-1], self.dims[1:])):
-            # print(self.dims)
-
             # transformation to apply at each layer.
             extra_layers = []
             for _ in range(self.prepool_extralayers):
-                extra_layer = GCNLayer(self.adjs[i], c_in, c_in, self.on_cuda, i, torch.LongTensor(np.array(range(self.adjs[i].shape[0]))))
+                if self.gnn == "GCN":
+                    extra_layer = GCNLayer(self.adjs[i], c_in, c_in, self.on_cuda, i, torch.LongTensor(np.array(range(self.adjs[i].shape[0]))))
+                elif self.gnn == "GAT":
+                    extra_layer = GATConv(c_in, c_in, heads=self.gat_heads, concat=True, negative_slope=0.2, dropout=0, bias=True)
                 extra_layers.append(extra_layer)
 
             prepool_convs.append(nn.ModuleList(extra_layers))
 
-            layer = GCNLayer(self.adjs[i], c_in, c_out, self.on_cuda, i, torch.tensor(self.centroids[i]))
+            if self.gnn == "GCN":
+                layer = GCNLayer(self.adjs[i], c_in, c_out, self.on_cuda, i, torch.tensor(self.centroids[i]))
+            elif self.gnn == "GAT":
+                layer = GATConv(c_in, c_out, heads=self.gat_heads, concat=True, negative_slope=0.2, dropout=0, bias=True)
+                # top_k_pooling.append(TopKPooling(c_out, ratio=0.5))
+
             convs.append(layer)
         self.conv_layers = nn.ModuleList(convs)
         self.prepool_conv_layers = prepool_convs
+        # self.top_k_pooling = top_k_pooling
 
     def add_gating_layers(self):
         if self.gating > 0.:
@@ -135,6 +164,8 @@ class GCN(Model):
         logistic_layers = []
         if self.attention_head > 0:
             logistic_in_dim = [self.attention_head * self.dims[-1]]
+        elif self.gnn == "GAT":
+            logistic_in_dim = [int(self.adjs[0].shape[0]) * self.dims[-1]]
         else:
             logistic_in_dim = [self.adjs[-1].shape[0] * self.dims[-1]]
         for d in logistic_in_dim:

@@ -28,7 +28,7 @@ class MLP(Model):
         else:
             self.last_layer = nn.Linear(in_dim, self.out_dim)
 
-        self.my_dropout = torch.nn.Dropout(0.5) if self.dropout else None
+        self.my_dropout = torch.nn.Dropout(0.2) if self.dropout else None
         logging.info("Done!")
 
         torch.manual_seed(self.seed)

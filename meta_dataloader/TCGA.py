@@ -136,6 +136,7 @@ class TCGATask(Dataset):
         if gene_symbol_map_file:
             self.gene_ids = symbol_map(self.gene_ids, gene_symbol_map_file)
 
+        print(cancer)
         # load the cancer specific matrix
         matrix = pd.read_csv(os.path.join(data_dir, 'clinicalMatrices', cancer + '_clinicalMatrix'), delimiter='\t')
         # TODO: verify we don't need this
@@ -254,16 +255,16 @@ def _download(data_dir, cancers):
 
         file_path += '.gz'
 
-        url = 'https://tcga.xenahubs.net/download/TCGA.{}.sampleMap/{}_clinicalMatrix.gz'.format(cancer, cancer)
+        url = 'https://tcga.xenahubs.net/download/TCGA.{}.sampleMap/{}_clinicalMatrix'.format(cancer, cancer)
 
         print('Downloading ' + url)
         data = urllib.request.urlopen(url)
 
-        with open(file_path, 'wb') as f:
+        with open(decompressed_file_path, 'wb') as f:
             f.write(data.read())
-        with open(decompressed_file_path, 'wb') as out_f, gzip.GzipFile(file_path) as zip_f:
-            out_f.write(zip_f.read())
-        os.unlink(file_path)
+        # with open(decompressed_file_path, 'wb') as out_f, gzip.GzipFile(file_path) as zip_f:
+        #     out_f.write(zip_f.read())
+        # os.unlink(file_path)
 
         if os.stat(decompressed_file_path).st_size == 0:
             os.remove(decompressed_file_path)

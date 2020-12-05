@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 
-import sys
-sys.path.append('../')
+import os,sys,inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0,parentdir) 
 
 import meta_dataloader.TCGA
 
@@ -12,6 +14,7 @@ import collections
 import sklearn.metrics
 import sklearn.model_selection
 import pandas as pd
+import torch
 
 
 import sys
@@ -100,7 +103,6 @@ def doMLP():
         sdict = dict(zip(skopt_args.keys(),suggestion))
         sdict["lr"] = 10**float((-sdict["lr"]))
         sdict["channels"] = 2**sdict["channels"]
-        print(sdict)
 
         model = models.mlp.MLP(name="MLP",
                                num_layer=sdict["layers"], 
@@ -108,7 +110,7 @@ def doMLP():
                                lr=sdict["lr"],
                                num_epochs=100,
                                patience=50,
-                               cuda=True,
+                               cuda=torch.cuda.is_available(),
                                metric=sklearn.metrics.accuracy_score,
                                verbose=False,
                                seed=args.seed)
@@ -137,7 +139,7 @@ def doMLP():
 
 
 
-results_mlp = doMLP()
+# results_mlp = doMLP()
 
 
 
@@ -165,7 +167,7 @@ def doGGC():
     skopt_args["lr"]=Integer(3, 5)
     #skopt_args["channels"]=Integer(4, 5)
     #skopt_args["embedding"]=Integer(4, 5)
-    skopt_args["num_layer"]=Integer(2, 3)
+    skopt_args["num_layer"]=Integer(2, 5)
     skopt_args["prepool_extralayers"]=Integer(1, 2)
 
     optimizer = skopt.Optimizer(dimensions=skopt_args.values(),
@@ -197,7 +199,7 @@ def doGGC():
 
         model = models.gcn.GCN(name="GCN_lay3_chan64_emb32_dropout_agg_hierarchy", 
                                dropout=False, 
-                               cuda=True,
+                               cuda=torch.cuda.is_available(),
                                num_layer=sdict["num_layer"],
                                prepool_extralayers=sdict["prepool_extralayers"],
                                channels=sdict["channels"], 

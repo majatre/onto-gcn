@@ -21,10 +21,10 @@ from models.utils import *
 class Model(nn.Module):
 
     def __init__(self, name=None, column_names=None, num_epochs=100, channels=16, num_layer=2, embedding=8, gating=0.,
-                 dropout=False, cuda=False, seed=0, adj=None, graph_name=None, aggregation=None, prepool_extralayers=0,
-                 lr=0.0001, patience=10, agg_reduce=2, scheduler=False, metric=sklearn.metrics.accuracy_score,
+                 dropout=False, cuda=False, seed=0, adj=None, graph_name=None, aggregation=None, prepool_extralayers=0, gnn="GCN", gat_heads=1,
+                 lr=0.0001, patience=10, agg_reduce=2, expression_scaling=False, scheduler=False, metric=sklearn.metrics.accuracy_score,
                  optimizer=torch.optim.Adam, weight_decay=0.0001, batch_size=10, train_valid_split=0.8, 
-                 evaluate_train=True, verbose=True, full_data_cuda=True):
+                 evaluate_train=True, verbose=False, full_data_cuda=True):
         self.name = name
         self.column_names = column_names
         self.num_layer = num_layer
@@ -38,10 +38,13 @@ class Model(nn.Module):
         self.adj = adj
         self.graph_name = graph_name
         self.prepool_extralayers = prepool_extralayers
+        self.gnn = gnn
+        self.gat_heads = gat_heads
         self.aggregation = aggregation
         self.lr = lr
         self.scheduler = scheduler
         self.agg_reduce = agg_reduce
+        self.expression_scaling = expression_scaling
         self.batch_size = batch_size
         self.start_patience = patience
         self.attention_head = 0
@@ -57,8 +60,9 @@ class Model(nn.Module):
             print("Early stopping metric is " + self.metric.__name__)
         super(Model, self).__init__()
 
-    def fit(self, X, y, adj=None):
+    def fit(self, X, y, adj=None, ontology_vectors=None):
         self.adj = adj
+        self.ontology_vectors = ontology_vectors
         self.X = X
         self.y = y
         self.setup_layers()
@@ -104,8 +108,8 @@ class Model(nn.Module):
 
                 targets = Variable(labels, requires_grad=False).long()
                 loss = criterion(y_pred, targets)
-                if self.verbose:
-                    print("  batch ({}/{})".format(i, x_train.shape[0]) + ", train loss:" + "{0:.4f}".format(loss))
+                # if self.verbose:
+                #     print("  batch ({}/{})".format(i, x_train.shape[0]) + ", train loss:" + "{0:.4f}".format(loss))
 
                 optimizer.zero_grad()
                 loss.backward()

@@ -46,7 +46,12 @@ def hierarchical_clustering(adj, n_clusters, verbose=True):
     if os.path.isfile(path):
         if verbose:
             print("Found cache for " + path);
-        clusters = np.load(path)
+        try:
+            clusters = np.load(path)
+        except:
+            clusters = sklearn.cluster.AgglomerativeClustering(n_clusters=n_clusters, affinity='euclidean',
+                                                    memory=cache_dir, connectivity=adj,
+                                                    compute_full_tree='auto', linkage='ward').fit_predict(adj.toarray())
     else:
         if verbose:
             print("No cache for " + path);
@@ -95,8 +100,7 @@ def setup_aggregates(adj, nb_layer, x, aggregation="hierarchy", agg_reduce=2, ve
     centroids = []
     for _ in range(nb_layer):
         n_clusters = int(adj.shape[0] / agg_reduce) if int(adj.shape[0] / agg_reduce) > 0 else adj.shape[0]
-        if verbose:
-            print("Reducing graph by a factor of " + str(agg_reduce) + " to " + str(n_clusters) + " nodes")
+        print("Reducing graph by a factor of " + str(agg_reduce) + " to " + str(n_clusters) + " nodes")
         if aggregation == "hierarchy":
             clusters = hierarchical_clustering(adj, n_clusters, verbose)
         elif aggregation == "random":
